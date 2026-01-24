@@ -1,0 +1,75 @@
+from rest_framework import serializers
+from .models import Subscription, PlanConfig, PaymentEvent
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    """Serializer for subscription responses"""
+    is_active = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Subscription
+        fields = [
+            'id',
+            'stripe_subscription_id',
+            'stripe_customer_id',
+            'status',
+            'stripe_price_id',
+            'stripe_product_id',
+            'current_period_start',
+            'current_period_end',
+            'cancel_at_period_end',
+            'canceled_at',
+            'trial_start',
+            'trial_end',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class PlanConfigSerializer(serializers.ModelSerializer):
+    """Serializer for plan configuration responses"""
+    features = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PlanConfig
+        fields = [
+            'id',
+            'name',
+            'stripe_price_id',
+            'price_cents',
+            'currency',
+            'interval',
+            'interval_count',
+            'trial_period_days',
+            'features',
+            'is_highlighted',
+            'cta_text',
+        ]
+
+    def get_features(self, obj):
+        return obj.features_list
+
+
+class CreateCheckoutSessionSerializer(serializers.Serializer):
+    """Serializer for checkout session creation request"""
+    price_id = serializers.CharField(required=True)
+    success_url = serializers.URLField(required=False, allow_null=True)
+    cancel_url = serializers.URLField(required=False, allow_null=True)
+    trial_period_days = serializers.IntegerField(required=False, allow_null=True)
+
+
+class CreatePortalSessionSerializer(serializers.Serializer):
+    """Serializer for portal session creation request"""
+    return_url = serializers.URLField(required=False, allow_null=True)
+
+
+class CheckoutSessionResponseSerializer(serializers.Serializer):
+    """Serializer for checkout session response"""
+    session_id = serializers.CharField()
+    url = serializers.URLField()
+
+
+class PortalSessionResponseSerializer(serializers.Serializer):
+    """Serializer for portal session response"""
+    url = serializers.URLField()

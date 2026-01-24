@@ -1,0 +1,387 @@
+databaseChangeLog:
+  - changeSet:
+      id: 020-create-subscriptions-table
+      author: genesis3
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: subscriptions
+      changes:
+        - createTable:
+            tableName: subscriptions
+            columns:
+              # BaseEntity fields
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: deleted
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: delete_reason
+                  type: TEXT
+              - column:
+                  name: tenant_id
+                  type: TEXT
+              - column:
+                  name: created_time
+                  type: BIGINT
+                  defaultValueComputed: "EXTRACT(EPOCH FROM NOW()) * 1000"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_time
+                  type: BIGINT
+                  defaultValueComputed: "EXTRACT(EPOCH FROM NOW()) * 1000"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: TEXT
+              - column:
+                  name: modified_by
+                  type: TEXT
+              - column:
+                  name: slug
+                  type: TEXT
+              # SubscriptionEntity specific fields
+              - column:
+                  name: stripe_subscription_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: stripe_customer_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_subscription_user
+                    references: users(id)
+              - column:
+                  name: status
+                  type: VARCHAR(30)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stripe_price_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stripe_product_id
+                  type: VARCHAR(255)
+              - column:
+                  name: current_period_start
+                  type: BIGINT
+              - column:
+                  name: current_period_end
+                  type: BIGINT
+              - column:
+                  name: cancel_at_period_end
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: canceled_at
+                  type: BIGINT
+              - column:
+                  name: trial_start
+                  type: BIGINT
+              - column:
+                  name: trial_end
+                  type: BIGINT
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_subscription_stripe_id
+            tableName: subscriptions
+            columns:
+              - column:
+                  name: stripe_subscription_id
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_subscription_customer_id
+            tableName: subscriptions
+            columns:
+              - column:
+                  name: stripe_customer_id
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_subscription_user_id
+            tableName: subscriptions
+            columns:
+              - column:
+                  name: user_id
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_subscription_status
+            tableName: subscriptions
+            columns:
+              - column:
+                  name: status
+
+  - changeSet:
+      id: 020-create-plan-configs-table
+      author: genesis3
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: plan_configs
+      changes:
+        - createTable:
+            tableName: plan_configs
+            columns:
+              # BaseEntity fields
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: deleted
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: delete_reason
+                  type: TEXT
+              - column:
+                  name: tenant_id
+                  type: TEXT
+              - column:
+                  name: created_time
+                  type: BIGINT
+                  defaultValueComputed: "EXTRACT(EPOCH FROM NOW()) * 1000"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_time
+                  type: BIGINT
+                  defaultValueComputed: "EXTRACT(EPOCH FROM NOW()) * 1000"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: TEXT
+              - column:
+                  name: modified_by
+                  type: TEXT
+              - column:
+                  name: slug
+                  type: TEXT
+              # PlanConfigEntity specific fields
+              - column:
+                  name: name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stripe_price_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: stripe_product_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: price_cents
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: VARCHAR(3)
+                  defaultValue: usd
+                  constraints:
+                    nullable: false
+              - column:
+                  name: billing_interval
+                  type: VARCHAR(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: interval_count
+                  type: INT
+                  defaultValueNumeric: 1
+                  constraints:
+                    nullable: false
+              - column:
+                  name: trial_period_days
+                  type: INT
+              - column:
+                  name: features
+                  type: TEXT
+              - column:
+                  name: is_active
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: display_order
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: is_highlighted
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: cta_text
+                  type: VARCHAR(50)
+                  defaultValue: Get Started
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_plan_stripe_price_id
+            tableName: plan_configs
+            columns:
+              - column:
+                  name: stripe_price_id
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_plan_stripe_product_id
+            tableName: plan_configs
+            columns:
+              - column:
+                  name: stripe_product_id
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_plan_name
+            tableName: plan_configs
+            columns:
+              - column:
+                  name: name
+
+  - changeSet:
+      id: 020-create-payment-events-table
+      author: genesis3
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: payment_events
+      changes:
+        - createTable:
+            tableName: payment_events
+            columns:
+              # BaseEntity fields
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: deleted
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: delete_reason
+                  type: TEXT
+              - column:
+                  name: tenant_id
+                  type: TEXT
+              - column:
+                  name: created_time
+                  type: BIGINT
+                  defaultValueComputed: "EXTRACT(EPOCH FROM NOW()) * 1000"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_time
+                  type: BIGINT
+                  defaultValueComputed: "EXTRACT(EPOCH FROM NOW()) * 1000"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: TEXT
+              - column:
+                  name: modified_by
+                  type: TEXT
+              - column:
+                  name: slug
+                  type: TEXT
+              # PaymentEventEntity specific fields
+              - column:
+                  name: stripe_event_id
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: event_type
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: processed_at
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: payload
+                  type: TEXT
+              - column:
+                  name: processing_status
+                  type: VARCHAR(20)
+                  defaultValue: PROCESSED
+                  constraints:
+                    nullable: false
+              - column:
+                  name: error_message
+                  type: TEXT
+              - column:
+                  name: retry_count
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_payment_event_stripe_id
+            tableName: payment_events
+            columns:
+              - column:
+                  name: stripe_event_id
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_payment_event_type
+            tableName: payment_events
+            columns:
+              - column:
+                  name: event_type
+        - createIndex:
+            schemaName: {{boundBackendModule.moduleId}}
+            indexName: idx_payment_event_processed_at
+            tableName: payment_events
+            columns:
+              - column:
+                  name: processed_at

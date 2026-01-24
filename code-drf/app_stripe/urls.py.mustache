@@ -1,0 +1,25 @@
+from django.urls import path
+from .views import (
+    PlansView,
+    SubscriptionView,
+    SubscriptionsListView,
+    CreateCheckoutSessionView,
+    CancelSubscriptionView,
+    CreatePortalSessionView,
+    StripeWebhookView,
+)
+
+app_name = 'stripe'
+
+urlpatterns = [
+    # Public endpoints
+    path('plans/', PlansView.as_view(), name='plans'),
+    path('webhook/', StripeWebhookView.as_view(), name='webhook'),
+
+    # Authenticated endpoints
+    path('subscription/', SubscriptionView.as_view(), name='subscription'),
+    path('subscriptions/', SubscriptionsListView.as_view(), name='subscriptions'),
+    path('create-checkout-session/', CreateCheckoutSessionView.as_view(), name='create-checkout-session'),
+    path('subscription/cancel/', CancelSubscriptionView.as_view(), name='cancel-subscription'),
+    path('create-portal-session/', CreatePortalSessionView.as_view(), name='create-portal-session'),
+]

@@ -1,0 +1,234 @@
+{
+  "version": "3.0.0",
+  "metadata": {
+    "id": "extension-stripe",
+    "name": "Stripe Payments",
+    "kind": "extension",
+    "type": "stripe",
+    "layers": ["backend", "frontend"],
+    "description": "Stripe payment integration with subscriptions and webhooks",
+    "version": "1.0.0",
+    "author": "Genesis Team",
+    "tags": ["payments", "stripe", "subscriptions", "billing"],
+    "providers": ["aws"],
+    "compatibleWith": ["spring", "react", "drf"],
+    "dependsOn": ["extension-rdbms"],
+    "springProfiles": ["stripe"],
+    "allowMultiple": false,
+    "providesFragments": {
+      "payment-provider": {
+        "mode": "conflict",
+        "notes": "Provides Stripe payment processing"
+      },
+      "django-settings": {
+        "mode": "append"
+      }
+    },
+    "onConflict": {
+      "message": "Only one payment provider can be active. Remove existing payment extension first."
+    },
+    "affiliateUrl": "https://stripe.com",
+    "affiliateNote": "Create a free Stripe account to get your API keys"
+  },
+  "scaffoldConfigTemplate": [
+    {
+      "key": "enableSubscriptions",
+      "label": "Enable Subscriptions",
+      "type": "boolean",
+      "default": true,
+      "required": false,
+      "description": "Enable recurring subscription billing",
+      "category": "feature",
+      "helpText": "Adds subscription management, plan configuration, and recurring billing support."
+    },
+    {
+      "key": "enableOneTimePayments",
+      "label": "Enable One-Time Payments",
+      "type": "boolean",
+      "default": false,
+      "required": false,
+      "description": "Enable single purchase payments",
+      "category": "feature",
+      "helpText": "For products, donations, or services that don't require recurring billing."
+    },
+    {
+      "key": "enableCustomerPortal",
+      "label": "Enable Customer Portal",
+      "type": "boolean",
+      "default": true,
+      "required": false,
+      "description": "Allow customers to manage subscriptions via Stripe portal",
+      "category": "feature",
+      "helpText": "Stripe-hosted portal for customers to update payment methods, cancel subscriptions, etc."
+    },
+    {
+      "key": "webhookEndpoint",
+      "label": "Webhook Endpoint Path",
+      "type": "text",
+      "default": "/api/stripe/webhook",
+      "required": true,
+      "description": "URL path for Stripe webhooks",
+      "example": "/api/stripe/webhook",
+      "category": "configuration",
+      "helpText": "Must start with /. Configure this same path in your Stripe Dashboard."
+    },
+    {
+      "key": "defaultCurrency",
+      "label": "Default Currency",
+      "type": "select",
+      "options": ["usd", "eur", "gbp", "cad", "aud", "jpy"],
+      "default": "usd",
+      "required": true,
+      "description": "Default currency for payments (can be overridden at runtime)",
+      "category": "configuration",
+      "optionNotes": {
+        "usd": { "notes": "US Dollar - recommended for US-based businesses" },
+        "eur": { "notes": "Euro - for European businesses" },
+        "gbp": { "notes": "British Pound" },
+        "cad": { "notes": "Canadian Dollar" },
+        "aud": { "notes": "Australian Dollar" },
+        "jpy": { "notes": "Japanese Yen - no decimal places" }
+      },
+      "runtimeOverride": "STRIPE_DEFAULT_CURRENCY"
+    },
+    {
+      "key": "trialPeriodDays",
+      "label": "Default Trial Period (Days)",
+      "type": "number",
+      "default": 14,
+      "required": false,
+      "description": "Default free trial period for new subscriptions (can be overridden at runtime)",
+      "example": "14",
+      "category": "feature",
+      "min": 0,
+      "max": 365,
+      "helpText": "Set to 0 to disable trials. Can be overridden per plan or via environment variable.",
+      "runtimeOverride": "STRIPE_TRIAL_PERIOD_DAYS"
+    },
+    {
+      "key": "collectBillingAddress",
+      "label": "Collect Billing Address",
+      "type": "boolean",
+      "default": false,
+      "required": false,
+      "description": "Require billing address during checkout",
+      "category": "feature",
+      "helpText": "Required for tax compliance in some jurisdictions."
+    }
+  ],
+  "dependencies": {
+    "gradle": [
+      "implementation 'com.stripe:stripe-java:31.2.0'"
+    ],
+    "npm": {
+      "dependencies": {
+        "@stripe/stripe-js": "^8.6.0",
+        "@stripe/react-stripe-js": "^5.4.0"
+      }
+    },
+    "pip": [
+      "stripe==14.2.0"
+    ]
+  },
+  "runtimeConfigTemplate": [
+    {
+      "key": "STRIPE_API_KEY",
+      "description": "Stripe secret API key (sk_live_... or sk_test_...)",
+      "example": "sk_test_xxxxxxxxxxxxx",
+      "required": true,
+      "secret": true,
+      "targets": ["backend"],
+      "commonForAllEnv": false,
+      "helpText": "Find this in Stripe Dashboard → Developers → API keys. Use sk_test_ for development."
+    },
+    {
+      "key": "STRIPE_PUBLISHABLE_KEY",
+      "description": "Stripe publishable key (pk_live_... or pk_test_...)",
+      "example": "pk_test_xxxxxxxxxxxxx",
+      "required": true,
+      "secret": false,
+      "targets": ["frontend", "backend"],
+      "commonForAllEnv": false,
+      "helpText": "Safe to expose in frontend code. Find in Stripe Dashboard → Developers → API keys."
+    },
+    {
+      "key": "STRIPE_WEBHOOK_SECRET",
+      "description": "Webhook signing secret (whsec_...)",
+      "example": "whsec_xxxxxxxxxxxxx",
+      "required": true,
+      "secret": true,
+      "targets": ["backend"],
+      "commonForAllEnv": false,
+      "helpText": "Created when you add a webhook endpoint in Stripe Dashboard. Use 'stripe listen' CLI for local development."
+    },
+    {
+      "key": "STRIPE_DEFAULT_CURRENCY",
+      "description": "Override the default currency for this environment",
+      "example": "eur",
+      "required": false,
+      "secret": false,
+      "targets": ["backend"],
+      "commonForAllEnv": false,
+      "scaffoldDefault": "defaultCurrency",
+      "helpText": "Overrides the scaffold-time default currency setting."
+    },
+    {
+      "key": "STRIPE_TRIAL_PERIOD_DAYS",
+      "description": "Override the default trial period (days) for this environment",
+      "example": "30",
+      "required": false,
+      "secret": false,
+      "targets": ["backend"],
+      "commonForAllEnv": false,
+      "scaffoldDefault": "trialPeriodDays",
+      "helpText": "Overrides the scaffold-time trial period. Set to 0 to disable trials."
+    },
+    {
+      "key": "STRIPE_SUCCESS_URL",
+      "description": "URL to redirect after successful checkout",
+      "example": "https://yourapp.com/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+      "required": false,
+      "secret": false,
+      "targets": ["backend"],
+      "commonForAllEnv": false,
+      "default": "runtime",
+      "helpText": "Stripe will append session_id. Use {CHECKOUT_SESSION_ID} placeholder."
+    },
+    {
+      "key": "STRIPE_CANCEL_URL",
+      "description": "URL to redirect when checkout is cancelled",
+      "example": "https://yourapp.com/checkout/cancelled",
+      "required": false,
+      "secret": false,
+      "targets": ["backend"],
+      "commonForAllEnv": false,
+      "default": "runtime"
+    }
+  ],
+  "generation": {
+    "layers": {
+      "backend": {},
+      "frontend": {}
+    }
+  },
+  "setupGuide": {
+    "steps": [
+      "Create a Stripe account at https://stripe.com",
+      "Get your API keys from Dashboard → Developers → API keys",
+      "SECURITY: Never expose your secret key (sk_*) in frontend code or version control",
+      "SECURITY: Store STRIPE_API_KEY and STRIPE_WEBHOOK_SECRET as encrypted secrets only",
+      "Configure webhook endpoint in Dashboard → Developers → Webhooks",
+      "SECURITY: Select only the events you need (checkout.session.completed, customer.subscription.*, invoice.payment_failed)",
+      "SECURITY: Restrict API keys to specific IP addresses in production (Dashboard → API keys → Restricted keys)",
+      "Use 'stripe listen --forward-to localhost:8080/api/stripe/webhook' for local testing"
+    ],
+    "documentation": "https://stripe.com/docs",
+    "securityChecklist": [
+      "Webhook signature verification is enabled (STRIPE_WEBHOOK_SECRET configured)",
+      "Secret API key is stored encrypted and never logged",
+      "HTTPS is enforced for all webhook endpoints",
+      "Webhook endpoint is rate-limited to prevent abuse",
+      "Idempotency keys are used for all payment creation requests"
+    ]
+  }
+}

@@ -1,0 +1,305 @@
+import stripe
+from datetime import datetime
+from django.conf import settings
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
+
+from app_rbac.models import User
+from .models import Subscription, PlanConfig, PaymentEvent, SubscriptionStatus
+from .serializers import (
+    SubscriptionSerializer,
+    PlanConfigSerializer,
+    CreateCheckoutSessionSerializer,
+    CreatePortalSessionSerializer,
+    CheckoutSessionResponseSerializer,
+    PortalSessionResponseSerializer,
+)
+
+
+class PlansView(APIView):
+    """API endpoint to get available pricing plans"""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        plans = PlanConfig.objects.filter(is_active=True).order_by('display_order')
+        serializer = PlanConfigSerializer(plans, many=True)
+        return Response(serializer.data)
+
+
+class SubscriptionView(APIView):
+    """API endpoint for subscription management"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get current user's active subscription"""
+        user = request.user
+        subscription = Subscription.objects.filter(
+            user=user,
+            status__in=[SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+        ).first()
+
+        if not subscription:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        serializer = SubscriptionSerializer(subscription)
+        return Response(serializer.data)
+
+
+class SubscriptionsListView(APIView):
+    """API endpoint to list all user subscriptions"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get all subscriptions for current user"""
+        user = request.user
+        subscriptions = Subscription.objects.filter(user=user)
+        serializer = SubscriptionSerializer(subscriptions, many=True)
+        return Response(serializer.data)
+
+
+class CreateCheckoutSessionView(APIView):
+    """API endpoint to create Stripe Checkout session"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateCheckoutSessionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        data = serializer.validated_data
+
+        # Get or create Stripe customer
+        customers = stripe.Customer.search(query=f"email:'{user.email}'")
+        if customers.data:
+            customer = customers.data[0]
+        else:
+            customer = stripe.Customer.create(
+                email=user.email,
+                name=user.full_name if hasattr(user, 'full_name') else user.username
+            )
+
+        # Build checkout session params
+        success_url = data.get('success_url') or f"{settings.APP_BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = data.get('cancel_url') or f"{settings.APP_BASE_URL}/payment/cancel"
+
+        session_params = {
+            'mode': 'subscription',
+            'customer': customer.id,
+            'success_url': success_url,
+            'cancel_url': cancel_url,
+            'line_items': [{
+                'price': data['price_id'],
+                'quantity': 1,
+            }],
+        }
+
+        # Add trial period if specified
+        if data.get('trial_period_days'):
+            session_params['subscription_data'] = {
+                'trial_period_days': data['trial_period_days']
+            }
+
+        session = stripe.checkout.Session.create(**session_params)
+
+        response_serializer = CheckoutSessionResponseSerializer({
+            'session_id': session.id,
+            'url': session.url
+        })
+        return Response(response_serializer.data)
+
+
+class CancelSubscriptionView(APIView):
+    """API endpoint to cancel subscription"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        subscription = Subscription.objects.filter(
+            user=user,
+            status__in=[SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+        ).first()
+
+        if not subscription:
+            return Response(
+                {'error': 'No active subscription found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Cancel in Stripe at period end
+        stripe.Subscription.modify(
+            subscription.stripe_subscription_id,
+            cancel_at_period_end=True
+        )
+
+        # Update local record
+        subscription.cancel_at_period_end = True
+        subscription.save()
+
+        serializer = SubscriptionSerializer(subscription)
+        return Response(serializer.data)
+
+
+class CreatePortalSessionView(APIView):
+    """API endpoint to create Stripe Customer Portal session"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreatePortalSessionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        data = serializer.validated_data
+
+        # Get customer from subscription
+        subscription = Subscription.objects.filter(user=user).first()
+        if not subscription:
+            return Response(
+                {'error': 'No subscription found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return_url = data.get('return_url') or f"{settings.APP_BASE_URL}/dashboard"
+
+        session = stripe.billing_portal.Session.create(
+            customer=subscription.stripe_customer_id,
+            return_url=return_url
+        )
+
+        response_serializer = PortalSessionResponseSerializer({'url': session.url})
+        return Response(response_serializer.data)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StripeWebhookView(APIView):
+    """API endpoint for Stripe webhooks"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        payload = request.body
+        sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+        webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, webhook_secret
+            )
+        except ValueError:
+            return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
+        except stripe.error.SignatureVerificationError:
+            return Response({'error': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check for idempotency
+        if PaymentEvent.objects.filter(stripe_event_id=event.id).exists():
+            return Response({'message': 'Already processed'})
+
+        # Record event for idempotency
+        payment_event = PaymentEvent.objects.create(
+            stripe_event_id=event.id,
+            event_type=event.type,
+            processed_at=timezone.now(),
+            payload=payload.decode('utf-8'),
+            processing_status='PROCESSING'
+        )
+
+        try:
+            # Process event based on type
+            if event.type == 'checkout.session.completed':
+                self._handle_checkout_completed(event)
+            elif event.type == 'customer.subscription.created':
+                pass  # Usually handled via checkout.session.completed
+            elif event.type == 'customer.subscription.updated':
+                self._handle_subscription_updated(event)
+            elif event.type == 'customer.subscription.deleted':
+                self._handle_subscription_deleted(event)
+            elif event.type == 'invoice.payment_failed':
+                self._handle_payment_failed(event)
+            elif event.type == 'invoice.payment_succeeded':
+                self._handle_payment_succeeded(event)
+
+            payment_event.processing_status = 'PROCESSED'
+            payment_event.save()
+
+            return Response({'message': 'Received'})
+
+        except Exception as e:
+            payment_event.processing_status = 'FAILED'
+            payment_event.error_message = str(e)
+            payment_event.retry_count += 1
+            payment_event.save()
+            return Response({'message': 'Error processed'})
+
+    def _handle_checkout_completed(self, event):
+        """Handle checkout.session.completed event"""
+        session = event.data.object
+
+        if session.mode != 'subscription':
+            return
+
+        subscription = stripe.Subscription.retrieve(session.subscription)
+
+        # Get user by email
+        customer_email = session.customer_email or session.customer_details.email
+        try:
+            user = User.objects.get(email=customer_email)
+        except User.DoesNotExist:
+            raise Exception(f"User not found for email: {customer_email}")
+
+        # Create subscription record
+        Subscription.objects.create(
+            stripe_subscription_id=subscription.id,
+            stripe_customer_id=subscription.customer,
+            user=user,
+            status=subscription.status,
+            stripe_price_id=subscription.items.data[0].price.id,
+            stripe_product_id=subscription.items.data[0].price.product,
+            current_period_start=datetime.fromtimestamp(subscription.current_period_start, tz=timezone.utc),
+            current_period_end=datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc),
+            cancel_at_period_end=subscription.cancel_at_period_end,
+            trial_start=datetime.fromtimestamp(subscription.trial_start, tz=timezone.utc) if subscription.trial_start else None,
+            trial_end=datetime.fromtimestamp(subscription.trial_end, tz=timezone.utc) if subscription.trial_end else None,
+        )
+
+    def _handle_subscription_updated(self, event):
+        """Handle customer.subscription.updated event"""
+        stripe_sub = event.data.object
+
+        try:
+            subscription = Subscription.objects.get(stripe_subscription_id=stripe_sub.id)
+        except Subscription.DoesNotExist:
+            return
+
+        subscription.status = stripe_sub.status
+        subscription.current_period_start = datetime.fromtimestamp(stripe_sub.current_period_start, tz=timezone.utc)
+        subscription.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end, tz=timezone.utc)
+        subscription.cancel_at_period_end = stripe_sub.cancel_at_period_end
+        if stripe_sub.canceled_at:
+            subscription.canceled_at = datetime.fromtimestamp(stripe_sub.canceled_at, tz=timezone.utc)
+        subscription.save()
+
+    def _handle_subscription_deleted(self, event):
+        """Handle customer.subscription.deleted event"""
+        stripe_sub = event.data.object
+
+        try:
+            subscription = Subscription.objects.get(stripe_subscription_id=stripe_sub.id)
+        except Subscription.DoesNotExist:
+            return
+
+        subscription.status = SubscriptionStatus.CANCELED
+        subscription.canceled_at = timezone.now()
+        subscription.save()
+
+    def _handle_payment_failed(self, event):
+        """Handle invoice.payment_failed event"""
+        # TODO: Send notification to user
+        pass
+
+    def _handle_payment_succeeded(self, event):
+        """Handle invoice.payment_succeeded event"""
+        # TODO: Send receipt to user
+        pass

@@ -1,0 +1,27 @@
+package {{{javaPackageFull}}}.model.rsp;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * Response containing Stripe Checkout session details
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class CheckoutSessionResponse {
+
+    private String sessionId;
+
+    private String url;
+
+    public static CheckoutSessionResponse of(String sessionId, String url) {
+        return CheckoutSessionResponse.builder()
+            .sessionId(sessionId)
+            .url(url)
+            .build();
+    }
+}

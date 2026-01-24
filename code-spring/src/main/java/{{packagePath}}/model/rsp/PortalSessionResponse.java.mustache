@@ -1,0 +1,24 @@
+package {{{javaPackageFull}}}.model.rsp;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * Response containing Stripe Customer Portal session details
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PortalSessionResponse {
+
+    private String url;
+
+    public static PortalSessionResponse of(String url) {
+        return PortalSessionResponse.builder()
+            .url(url)
+            .build();
+    }
+}

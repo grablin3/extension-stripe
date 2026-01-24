@@ -1,0 +1,16 @@
+# Stripe configuration for {{{projectName}}}
+# Profile: stripe
+
+stripe:
+  api-key: ${STRIPE_API_KEY}
+  webhook:
+    secret: ${STRIPE_WEBHOOK_SECRET}
+  success-url: ${STRIPE_SUCCESS_URL:${app.base-url}/payment/success}
+  cancel-url: ${STRIPE_CANCEL_URL:${app.base-url}/payment/cancel}
+
+# Logging
+logging:
+  level:
+    com.stripe: INFO
+    {{{javaPackageFull}}}.controller.StripeWebhookController: DEBUG
+    {{{javaPackageFull}}}.service.StripeService: DEBUG

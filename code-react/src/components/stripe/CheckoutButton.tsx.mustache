@@ -1,0 +1,55 @@
+import type { ReactNode } from 'react';
+import { useStripe } from '../../hooks/useStripe';
+
+interface CheckoutButtonProps {
+  priceId: string;
+  children?: ReactNode;
+  className?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  trialPeriodDays?: number;
+  disabled?: boolean;
+}
+
+/**
+ * Button component that initiates Stripe Checkout
+ */
+export function CheckoutButton({
+  priceId,
+  children = 'Subscribe',
+  className,
+  successUrl,
+  cancelUrl,
+  trialPeriodDays,
+  disabled,
+}: CheckoutButtonProps) {
+  const { createCheckoutSession, isLoading, error } = useStripe();
+
+  const handleClick = async () => {
+    try {
+      await createCheckoutSession(priceId, {
+        successUrl,
+        cancelUrl,
+        trialPeriodDays,
+      });
+    } catch (err) {
+      console.error('Checkout error:', err);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={disabled || isLoading}
+        className={className}
+        aria-busy={isLoading}
+        aria-label={isLoading ? 'Processing checkout...' : undefined}
+      >
+        {isLoading ? 'Loading...' : children}
+      </button>
+      {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+    </div>
+  );
+}

@@ -1,0 +1,248 @@
+import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { useCallback, useEffect, useState } from 'react';
+
+const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+
+// Validate Stripe publishable key at module load time
+if (!STRIPE_PUBLISHABLE_KEY || STRIPE_PUBLISHABLE_KEY === 'pk_test_YOUR_PUBLISHABLE_KEY_HERE') {
+  console.error(
+    '[Stripe] Missing or invalid VITE_STRIPE_PUBLISHABLE_KEY. ' +
+    'Set this in your .env file with your Stripe publishable key (pk_test_xxx or pk_live_xxx). ' +
+    'Get your key from: https://dashboard.stripe.com/apikeys'
+  );
+}
+
+const stripePromise = STRIPE_PUBLISHABLE_KEY && !STRIPE_PUBLISHABLE_KEY.startsWith('pk_test_YOUR')
+  ? loadStripe(STRIPE_PUBLISHABLE_KEY)
+  : Promise.resolve(null);
+
+interface CheckoutSessionResponse {
+  sessionId: string;
+  url: string;
+}
+
+interface PortalSessionResponse {
+  url: string;
+}
+
+interface SubscriptionResponse {
+  id: number;
+  stripeSubscriptionId: string;
+  status: string;
+  stripePriceId: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  cancelAtPeriodEnd: boolean;
+  isActive: boolean;
+}
+
+interface PlanResponse {
+  id: number;
+  name: string;
+  stripePriceId: string;
+  priceCents: number;
+  currency: string;
+  interval: string;
+  intervalCount: number;
+  trialPeriodDays: number | null;
+  features: string[];
+  isHighlighted: boolean;
+  ctaText: string;
+}
+
+interface UseStripeReturn {
+  stripe: Stripe | null;
+  isLoading: boolean;
+  error: string | null;
+  createCheckoutSession: (priceId: string, options?: CheckoutOptions) => Promise<void>;
+  createPortalSession: (returnUrl?: string) => Promise<void>;
+  getSubscription: () => Promise<SubscriptionResponse | null>;
+  getPlans: () => Promise<PlanResponse[]>;
+  cancelSubscription: () => Promise<SubscriptionResponse>;
+}
+
+interface CheckoutOptions {
+  successUrl?: string;
+  cancelUrl?: string;
+  trialPeriodDays?: number;
+}
+
+/**
+ * Hook for Stripe operations
+ */
+export function useStripe(): UseStripeReturn {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stripe, setStripe] = useState<Stripe | null>(null);
+
+  // Initialize Stripe
+  useEffect(() => {
+    let mounted = true;
+    stripePromise.then((stripeInstance) => {
+      if (mounted) {
+        setStripe(stripeInstance);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const createCheckoutSession = useCallback(async (
+    priceId: string,
+    options: CheckoutOptions = {}
+  ) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/v1/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          priceId,
+          successUrl: options.successUrl,
+          cancelUrl: options.cancelUrl,
+          trialPeriodDays: options.trialPeriodDays,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create checkout session');
+      }
+
+      const data: CheckoutSessionResponse = await response.json();
+
+      // Redirect to Stripe Checkout
+      if (data.url) {
+        window.location.href = data.url;
+      } else if (stripe && data.sessionId) {
+        const { error: stripeError } = await stripe.redirectToCheckout({
+          sessionId: data.sessionId,
+        });
+        if (stripeError) {
+          throw new Error(stripeError.message);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [stripe]);
+
+  const createPortalSession = useCallback(async (returnUrl?: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/v1/stripe/create-portal-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ returnUrl }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create portal session');
+      }
+
+      const data: PortalSessionResponse = await response.json();
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const getSubscription = useCallback(async (): Promise<SubscriptionResponse | null> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/v1/stripe/subscription', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (response.status === 204) {
+        return null;
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to get subscription');
+      }
+
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const getPlans = useCallback(async (): Promise<PlanResponse[]> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/v1/stripe/plans', {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get plans');
+      }
+
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const cancelSubscription = useCallback(async (): Promise<SubscriptionResponse> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/v1/stripe/subscription/cancel', {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to cancel subscription');
+      }
+
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return {
+    stripe,
+    isLoading,
+    error,
+    createCheckoutSession,
+    createPortalSession,
+    getSubscription,
+    getPlans,
+    cancelSubscription,
+  };
+}

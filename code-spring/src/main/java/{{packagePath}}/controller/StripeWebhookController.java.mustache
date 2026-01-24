@@ -1,0 +1,187 @@
+package {{{javaPackageFull}}}.controller;
+
+import com.stripe.exception.SignatureVerificationException;
+import com.stripe.model.Event;
+import com.stripe.model.EventDataObjectDeserializer;
+import com.stripe.model.Subscription;
+import com.stripe.model.checkout.Session;
+import com.stripe.net.Webhook;
+import {{{javaPackageFull}}}.jpa.entity.PaymentEventEntity;
+import {{{javaPackageFull}}}.jpa.repository.PaymentEventRepository;
+import {{{javaPackageFull}}}.service.StripeService;
+import {{{javaPackageFull}}}.service.SubscriptionService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.TransientDataAccessException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.Instant;
+
+/**
+ * Stripe webhook controller for {{{projectName}}}
+ *
+ * Handles incoming Stripe webhooks with signature verification
+ */
+@RestController
+@RequestMapping("{{{webhookEndpoint}}}")
+@Profile("stripe")
+@RequiredArgsConstructor
+@Slf4j
+public class StripeWebhookController {
+
+    private final PaymentEventRepository paymentEventRepository;
+    private final SubscriptionService subscriptionService;
+    private final StripeService stripeService;
+
+    @Value("${stripe.webhook.secret}")
+    private String webhookSecret;
+
+    @PostMapping
+    @Transactional
+    public ResponseEntity<String> handleWebhook(
+            @RequestBody String payload,
+            @RequestHeader("Stripe-Signature") String sigHeader) {
+
+        Event event;
+
+        // Verify webhook signature
+        try {
+            event = Webhook.constructEvent(payload, sigHeader, webhookSecret);
+        } catch (SignatureVerificationException e) {
+            log.warn("Webhook signature verification failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body("Invalid signature");
+        }
+
+        // Atomic idempotency check with database constraint
+        // Use INSERT with unique constraint to prevent race conditions
+        PaymentEventEntity eventEntity;
+        try {
+            eventEntity = PaymentEventEntity.builder()
+                .stripeEventId(event.getId())
+                .eventType(event.getType())
+                .processedAt(Instant.now())
+                .payload(payload)
+                .processingStatus("PROCESSING")
+                .build();
+            paymentEventRepository.save(eventEntity);
+            paymentEventRepository.flush(); // Force constraint check immediately
+        } catch (DataIntegrityViolationException e) {
+            // Unique constraint violation = duplicate event
+            log.info("Skipping duplicate event (constraint): {}", event.getId());
+            return ResponseEntity.ok("Already processed");
+        }
+
+        try {
+            // Process event based on type
+            switch (event.getType()) {
+                case "checkout.session.completed" -> handleCheckoutSessionCompleted(event);
+                case "customer.subscription.created" -> handleSubscriptionCreated(event);
+                case "customer.subscription.updated" -> handleSubscriptionUpdated(event);
+                case "customer.subscription.deleted" -> handleSubscriptionDeleted(event);
+                case "invoice.payment_failed" -> handleInvoicePaymentFailed(event);
+                case "invoice.payment_succeeded" -> handleInvoicePaymentSucceeded(event);
+                default -> log.debug("Unhandled event type: {}", event.getType());
+            }
+
+            // Mark as successfully processed
+            eventEntity.setProcessingStatus("PROCESSED");
+            paymentEventRepository.save(eventEntity);
+
+            return ResponseEntity.ok("Received");
+
+        } catch (TransientDataAccessException | DataAccessResourceFailureException e) {
+            // Transient infrastructure errors: database unavailable, connection issues
+            // Return 5xx so Stripe will retry
+            log.error("Transient error processing webhook event {} (will retry): {}",
+                event.getId(), e.getMessage(), e);
+            eventEntity.setProcessingStatus("PENDING_RETRY");
+            eventEntity.setErrorMessage(e.getMessage());
+            paymentEventRepository.save(eventEntity);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body("Temporary error, please retry");
+
+        } catch (Exception e) {
+            // Application/business logic errors: don't retry
+            log.error("Application error processing webhook event {}: {}",
+                event.getId(), e.getMessage(), e);
+
+            eventEntity.setProcessingStatus("FAILED");
+            eventEntity.setErrorMessage(e.getMessage());
+            eventEntity.setRetryCount(eventEntity.getRetryCount() + 1);
+            paymentEventRepository.save(eventEntity);
+
+            // Return 200 to prevent Stripe from retrying for non-transient errors
+            return ResponseEntity.ok("Error processed");
+        }
+    }
+
+    private void handleCheckoutSessionCompleted(Event event) throws Exception {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        if (deserializer.getObject().isEmpty()) {
+            throw new IllegalStateException("Failed to deserialize checkout session");
+        }
+
+        Session session = (Session) deserializer.getObject().get();
+
+        if ("subscription".equals(session.getMode())) {
+            // Retrieve the full subscription
+            Subscription subscription = stripeService.getSubscription(session.getSubscription());
+            subscriptionService.createFromCheckoutSession(session, subscription);
+            log.info("Created subscription from checkout session: {}", session.getId());
+        } else {
+            log.info("Processed one-time payment checkout: {}", session.getId());
+        }
+    }
+
+    private void handleSubscriptionCreated(Event event) throws Exception {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        if (deserializer.getObject().isEmpty()) {
+            throw new IllegalStateException("Failed to deserialize subscription");
+        }
+
+        Subscription subscription = (Subscription) deserializer.getObject().get();
+        log.info("Subscription created: {}", subscription.getId());
+        // Note: Subscription is typically created via checkout.session.completed
+        // This event can be used for subscriptions created via API
+    }
+
+    private void handleSubscriptionUpdated(Event event) throws Exception {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        if (deserializer.getObject().isEmpty()) {
+            throw new IllegalStateException("Failed to deserialize subscription");
+        }
+
+        Subscription subscription = (Subscription) deserializer.getObject().get();
+        subscriptionService.updateFromStripeSubscription(subscription);
+        log.info("Subscription updated: {}", subscription.getId());
+    }
+
+    private void handleSubscriptionDeleted(Event event) throws Exception {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        if (deserializer.getObject().isEmpty()) {
+            throw new IllegalStateException("Failed to deserialize subscription");
+        }
+
+        Subscription subscription = (Subscription) deserializer.getObject().get();
+        subscriptionService.cancelSubscription(subscription.getId());
+        log.info("Subscription deleted: {}", subscription.getId());
+    }
+
+    private void handleInvoicePaymentFailed(Event event) {
+        log.warn("Invoice payment failed for event: {}", event.getId());
+        // TODO: Send notification to user about failed payment
+        // TODO: Update subscription status if needed
+    }
+
+    private void handleInvoicePaymentSucceeded(Event event) {
+        log.info("Invoice payment succeeded for event: {}", event.getId());
+        // TODO: Send receipt to user
+    }
+}

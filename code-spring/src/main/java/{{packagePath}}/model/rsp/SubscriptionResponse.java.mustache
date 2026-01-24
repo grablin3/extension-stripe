@@ -1,0 +1,61 @@
+package {{{javaPackageFull}}}.model.rsp;
+
+import {{{javaPackageFull}}}.jpa.entity.SubscriptionEntity;
+import {{{javaPackageFull}}}.jpa.enumtype.SubscriptionStatus;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.Instant;
+
+/**
+ * Response containing subscription details
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SubscriptionResponse {
+
+    private Long id;
+
+    private String stripeSubscriptionId;
+
+    private SubscriptionStatus status;
+
+    private String stripePriceId;
+
+    private String stripeProductId;
+
+    private Instant currentPeriodStart;
+
+    private Instant currentPeriodEnd;
+
+    private Boolean cancelAtPeriodEnd;
+
+    private Instant canceledAt;
+
+    private Instant trialStart;
+
+    private Instant trialEnd;
+
+    private Boolean isActive;
+
+    public static SubscriptionResponse fromEntity(SubscriptionEntity entity) {
+        return SubscriptionResponse.builder()
+            .id(entity.getId())
+            .stripeSubscriptionId(entity.getStripeSubscriptionId())
+            .status(entity.getStatus())
+            .stripePriceId(entity.getStripePriceId())
+            .stripeProductId(entity.getStripeProductId())
+            .currentPeriodStart(entity.getCurrentPeriodStart())
+            .currentPeriodEnd(entity.getCurrentPeriodEnd())
+            .cancelAtPeriodEnd(entity.getCancelAtPeriodEnd())
+            .canceledAt(entity.getCanceledAt())
+            .trialStart(entity.getTrialStart())
+            .trialEnd(entity.getTrialEnd())
+            .isActive(entity.isActive())
+            .build();
+    }
+}

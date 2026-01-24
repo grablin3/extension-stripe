@@ -1,0 +1,9 @@
+
+# Stripe configuration
+STRIPE_API_KEY = env('STRIPE_API_KEY', default='')
+STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY', default='')
+STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET', default='')
+APP_BASE_URL = env('APP_BASE_URL', default='http://localhost:8000')
+
+# Add app_stripe to installed apps
+INSTALLED_APPS += ['app_stripe']

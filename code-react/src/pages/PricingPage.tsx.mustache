@@ -1,0 +1,37 @@
+import { PricingTable } from '../components/stripe';
+
+/**
+ * Pricing page displaying available subscription plans
+ */
+export function PricingPage() {
+  return (
+    <div className="min-h-screen bg-gray-50 py-12">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
+            Simple, transparent pricing
+          </h1>
+          <p className="mt-4 text-xl text-gray-600">
+            Choose the plan that's right for you
+          </p>
+        </div>
+
+        <div className="mt-12">
+          <PricingTable
+            successUrl={`${window.location.origin}/payment/success`}
+            cancelUrl={`${window.location.origin}/pricing`}
+          />
+        </div>
+
+        <div className="mt-12 text-center">
+          <p className="text-gray-500">
+            All plans include a 14-day free trial. No credit card required to start.
+          </p>
+          <p className="mt-2 text-sm text-gray-400">
+            Prices shown are in USD. Taxes may apply.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,207 @@
+package {{{javaPackageFull}}}.service;
+
+import com.stripe.exception.StripeException;
+import com.stripe.model.Customer;
+import com.stripe.model.Subscription;
+import com.stripe.model.checkout.Session;
+import com.stripe.net.RequestOptions;
+import com.stripe.param.CustomerCreateParams;
+import com.stripe.param.checkout.SessionCreateParams;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Service;
+
+import java.util.UUID;
+
+/**
+ * Core Stripe SDK operations for {{{projectName}}}
+ */
+@Service
+@Profile("stripe")
+@RequiredArgsConstructor
+@Slf4j
+public class StripeService {
+
+    @Value("${stripe.success-url:${app.base-url}/payment/success}")
+    private String defaultSuccessUrl;
+
+    @Value("${stripe.cancel-url:${app.base-url}/payment/cancel}")
+    private String defaultCancelUrl;
+
+    /**
+     * Create or retrieve a Stripe customer for the given email.
+     * Uses email-based idempotency key to prevent duplicate customers.
+     */
+    public Customer createOrGetCustomer(String email, String name) throws StripeException {
+        // Search for existing customer
+        var searchParams = com.stripe.param.CustomerSearchParams.builder()
+            .setQuery("email:'" + email + "'")
+            .build();
+
+        var customers = Customer.search(searchParams);
+        if (customers != null && customers.getData() != null && !customers.getData().isEmpty()) {
+            return customers.getData().get(0);
+        }
+
+        // Create new customer with idempotency key based on email
+        // This prevents duplicate customers if the same request is retried
+        CustomerCreateParams params = CustomerCreateParams.builder()
+            .setEmail(email)
+            .setName(name)
+            .build();
+
+        RequestOptions requestOptions = RequestOptions.builder()
+            .setIdempotencyKey("customer_create_" + email.toLowerCase().hashCode())
+            .build();
+
+        return Customer.create(params, requestOptions);
+    }
+
+    {{#enableSubscriptions}}
+    /**
+     * Create a Stripe Checkout session for subscription.
+     *
+     * @param customerId Stripe customer ID
+     * @param priceId Stripe price ID for the subscription plan
+     * @param successUrl Redirect URL after successful checkout
+     * @param cancelUrl Redirect URL when checkout is cancelled
+     * @param trialPeriodDays Optional trial period in days
+     * @param idempotencyKey Optional key to prevent duplicate checkout sessions (e.g., "checkout_user123_plan456")
+     */
+    public Session createSubscriptionCheckoutSession(
+            String customerId,
+            String priceId,
+            String successUrl,
+            String cancelUrl,
+            Integer trialPeriodDays,
+            String idempotencyKey) throws StripeException {
+
+        SessionCreateParams.Builder builder = SessionCreateParams.builder()
+            .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
+            .setCustomer(customerId)
+            .setSuccessUrl(successUrl != null ? successUrl : defaultSuccessUrl + "?session_id={CHECKOUT_SESSION_ID}")
+            .setCancelUrl(cancelUrl != null ? cancelUrl : defaultCancelUrl)
+            .addLineItem(
+                SessionCreateParams.LineItem.builder()
+                    .setPrice(priceId)
+                    .setQuantity(1L)
+                    .build()
+            );
+
+        if (trialPeriodDays != null && trialPeriodDays > 0) {
+            builder.setSubscriptionData(
+                SessionCreateParams.SubscriptionData.builder()
+                    .setTrialPeriodDays(trialPeriodDays.longValue())
+                    .build()
+            );
+        }
+
+        RequestOptions requestOptions = RequestOptions.builder()
+            .setIdempotencyKey(idempotencyKey != null ? idempotencyKey : UUID.randomUUID().toString())
+            .build();
+
+        return Session.create(builder.build(), requestOptions);
+    }
+
+    /**
+     * Retrieve a Stripe subscription
+     */
+    public Subscription getSubscription(String subscriptionId) throws StripeException {
+        return Subscription.retrieve(subscriptionId);
+    }
+
+    /**
+     * Cancel a Stripe subscription at period end
+     */
+    public Subscription cancelSubscriptionAtPeriodEnd(String subscriptionId) throws StripeException {
+        Subscription subscription = Subscription.retrieve(subscriptionId);
+        var params = com.stripe.param.SubscriptionUpdateParams.builder()
+            .setCancelAtPeriodEnd(true)
+            .build();
+        return subscription.update(params);
+    }
+
+    /**
+     * Cancel a Stripe subscription immediately
+     */
+    public Subscription cancelSubscriptionImmediately(String subscriptionId) throws StripeException {
+        Subscription subscription = Subscription.retrieve(subscriptionId);
+        return subscription.cancel();
+    }
+    {{/enableSubscriptions}}
+
+    {{#enableOneTimePayments}}
+    /**
+     * Create a Stripe Checkout session for one-time payment.
+     *
+     * @param customerId Stripe customer ID
+     * @param priceId Stripe price ID for the product
+     * @param quantity Number of items (defaults to 1)
+     * @param successUrl Redirect URL after successful checkout
+     * @param cancelUrl Redirect URL when checkout is cancelled
+     * @param idempotencyKey Optional key to prevent duplicate checkout sessions
+     */
+    public Session createPaymentCheckoutSession(
+            String customerId,
+            String priceId,
+            Integer quantity,
+            String successUrl,
+            String cancelUrl,
+            String idempotencyKey) throws StripeException {
+
+        SessionCreateParams params = SessionCreateParams.builder()
+            .setMode(SessionCreateParams.Mode.PAYMENT)
+            .setCustomer(customerId)
+            .setSuccessUrl(successUrl != null ? successUrl : defaultSuccessUrl + "?session_id={CHECKOUT_SESSION_ID}")
+            .setCancelUrl(cancelUrl != null ? cancelUrl : defaultCancelUrl)
+            .addLineItem(
+                SessionCreateParams.LineItem.builder()
+                    .setPrice(priceId)
+                    .setQuantity(quantity != null ? quantity.longValue() : 1L)
+                    .build()
+            )
+            .build();
+
+        RequestOptions requestOptions = RequestOptions.builder()
+            .setIdempotencyKey(idempotencyKey != null ? idempotencyKey : UUID.randomUUID().toString())
+            .build();
+
+        return Session.create(params, requestOptions);
+    }
+    {{/enableOneTimePayments}}
+
+    {{#enableCustomerPortal}}
+    /**
+     * Create a Stripe Customer Portal session.
+     *
+     * @param customerId Stripe customer ID
+     * @param returnUrl URL to redirect after portal interaction
+     * @param idempotencyKey Optional key to prevent duplicate portal sessions
+     */
+    public com.stripe.model.billingportal.Session createPortalSession(
+            String customerId,
+            String returnUrl,
+            String idempotencyKey) throws StripeException {
+
+        var params = com.stripe.param.billingportal.SessionCreateParams.builder()
+            .setCustomer(customerId)
+            .setReturnUrl(returnUrl != null ? returnUrl : defaultSuccessUrl)
+            .build();
+
+        RequestOptions requestOptions = RequestOptions.builder()
+            .setIdempotencyKey(idempotencyKey != null ? idempotencyKey : UUID.randomUUID().toString())
+            .build();
+
+        return com.stripe.model.billingportal.Session.create(params, requestOptions);
+    }
+    {{/enableCustomerPortal}}
+
+    /**
+     * Retrieve a checkout session
+     */
+    public Session getCheckoutSession(String sessionId) throws StripeException {
+        return Session.retrieve(sessionId);
+    }
+}

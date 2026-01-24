@@ -1,0 +1,26 @@
+package {{{javaPackageFull}}}.jpa.repository;
+
+import {{{javaPackageFull}}}.jpa.entity.PaymentEventEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Repository for payment event entities in {{{projectName}}}
+ */
+@Repository
+public interface PaymentEventRepository extends JpaRepository<PaymentEventEntity, Long> {
+
+    Optional<PaymentEventEntity> findByStripeEventId(String stripeEventId);
+
+    boolean existsByStripeEventId(String stripeEventId);
+
+    List<PaymentEventEntity> findByEventType(String eventType);
+
+    List<PaymentEventEntity> findByProcessingStatus(String processingStatus);
+
+    List<PaymentEventEntity> findByProcessedAtBefore(Instant before);
+}

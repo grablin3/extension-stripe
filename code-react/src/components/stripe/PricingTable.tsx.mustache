@@ -1,0 +1,145 @@
+import { useEffect, useState } from 'react';
+import { useStripe } from '../../hooks/useStripe';
+import { CheckoutButton } from './CheckoutButton';
+
+interface Plan {
+  id: number;
+  name: string;
+  stripePriceId: string;
+  priceCents: number;
+  currency: string;
+  interval: string;
+  intervalCount: number;
+  trialPeriodDays: number | null;
+  features: string[];
+  isHighlighted: boolean;
+  ctaText: string;
+}
+
+interface PricingTableProps {
+  className?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+}
+
+/**
+ * Pricing table component displaying available plans
+ */
+export function PricingTable({
+  className,
+  successUrl,
+  cancelUrl,
+}: PricingTableProps) {
+  const { getPlans, isLoading, error } = useStripe();
+  const [plans, setPlans] = useState<Plan[]>([]);
+
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        const data = await getPlans();
+        setPlans(data);
+      } catch (err) {
+        console.error('Failed to fetch plans:', err);
+      }
+    };
+
+    fetchPlans();
+  }, [getPlans]);
+
+  const formatPrice = (cents: number, currency: string) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+    }).format(cents / 100);
+  };
+
+  const formatInterval = (interval: string, count: number) => {
+    if (count === 1) {
+      return `/${interval}`;
+    }
+    return `/${count} ${interval}s`;
+  };
+
+  if (isLoading && plans.length === 0) {
+    return <div className="text-center py-8">Loading plans...</div>;
+  }
+
+  if (error) {
+    return <div className="text-center py-8 text-red-500">{error}</div>;
+  }
+
+  return (
+    <div className={`grid gap-6 md:grid-cols-2 lg:grid-cols-3 ${className || ''}`}>
+      {plans.map((plan) => (
+        <div
+          key={plan.id}
+          className={`
+            rounded-lg border p-6 shadow-sm
+            ${plan.isHighlighted ? 'border-blue-500 ring-2 ring-blue-500' : 'border-gray-200'}
+          `}
+        >
+          {plan.isHighlighted && (
+            <div className="mb-4 text-center">
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800">
+                Most Popular
+              </span>
+            </div>
+          )}
+
+          <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
+
+          <div className="mt-4">
+            <span className="text-4xl font-bold text-gray-900">
+              {formatPrice(plan.priceCents, plan.currency)}
+            </span>
+            <span className="text-gray-500">
+              {formatInterval(plan.interval, plan.intervalCount)}
+            </span>
+          </div>
+
+          {plan.trialPeriodDays && (
+            <p className="mt-2 text-sm text-gray-500">
+              {plan.trialPeriodDays}-day free trial
+            </p>
+          )}
+
+          <ul className="mt-6 space-y-3">
+            {plan.features.map((feature, index) => (
+              <li key={index} className="flex items-start">
+                <svg
+                  className="h-5 w-5 flex-shrink-0 text-green-500"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span className="ml-2 text-gray-600">{feature}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-8">
+            <CheckoutButton
+              priceId={plan.stripePriceId}
+              successUrl={successUrl}
+              cancelUrl={cancelUrl}
+              trialPeriodDays={plan.trialPeriodDays || undefined}
+              className={`
+                w-full rounded-lg px-4 py-2 font-medium
+                ${plan.isHighlighted
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}
+              `}
+            >
+              {plan.ctaText}
+            </CheckoutButton>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

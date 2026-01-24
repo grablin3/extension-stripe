@@ -1,0 +1,140 @@
+# Generated migration for Stripe models
+
+from django.db import migrations, models
+import django.db.models.deletion
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+        ('app_rbac', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='PaymentEvent',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('deleted', models.BooleanField(default=False)),
+                ('delete_reason', models.CharField(blank=True, max_length=500, null=True)),
+                ('tenant_id', models.CharField(blank=True, max_length=100, null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('created_by', models.CharField(blank=True, max_length=100, null=True)),
+                ('modified_by', models.CharField(blank=True, max_length=100, null=True)),
+                ('slug', models.CharField(blank=True, max_length=255, null=True)),
+                ('stripe_event_id', models.CharField(max_length=255, unique=True)),
+                ('event_type', models.CharField(max_length=100)),
+                ('processed_at', models.DateTimeField()),
+                ('payload', models.TextField(blank=True, null=True)),
+                ('processing_status', models.CharField(default='PROCESSED', max_length=20)),
+                ('error_message', models.TextField(blank=True, null=True)),
+                ('retry_count', models.IntegerField(default=0)),
+            ],
+            options={
+                'db_table': 'payment_events',
+            },
+        ),
+        migrations.CreateModel(
+            name='PlanConfig',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('deleted', models.BooleanField(default=False)),
+                ('delete_reason', models.CharField(blank=True, max_length=500, null=True)),
+                ('tenant_id', models.CharField(blank=True, max_length=100, null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('created_by', models.CharField(blank=True, max_length=100, null=True)),
+                ('modified_by', models.CharField(blank=True, max_length=100, null=True)),
+                ('slug', models.CharField(blank=True, max_length=255, null=True)),
+                ('name', models.CharField(max_length=100)),
+                ('stripe_price_id', models.CharField(max_length=255, unique=True)),
+                ('stripe_product_id', models.CharField(max_length=255)),
+                ('price_cents', models.BigIntegerField()),
+                ('currency', models.CharField(default='usd', max_length=3)),
+                ('interval', models.CharField(max_length=20)),
+                ('interval_count', models.IntegerField(default=1)),
+                ('trial_period_days', models.IntegerField(blank=True, null=True)),
+                ('features', models.TextField(blank=True, null=True)),
+                ('is_active', models.BooleanField(default=True)),
+                ('display_order', models.IntegerField(default=0)),
+                ('is_highlighted', models.BooleanField(default=False)),
+                ('cta_text', models.CharField(default='Get Started', max_length=50)),
+            ],
+            options={
+                'db_table': 'plan_configs',
+                'ordering': ['display_order'],
+            },
+        ),
+        migrations.CreateModel(
+            name='Subscription',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('deleted', models.BooleanField(default=False)),
+                ('delete_reason', models.CharField(blank=True, max_length=500, null=True)),
+                ('tenant_id', models.CharField(blank=True, max_length=100, null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('created_by', models.CharField(blank=True, max_length=100, null=True)),
+                ('modified_by', models.CharField(blank=True, max_length=100, null=True)),
+                ('slug', models.CharField(blank=True, max_length=255, null=True)),
+                ('stripe_subscription_id', models.CharField(max_length=255, unique=True)),
+                ('stripe_customer_id', models.CharField(max_length=255)),
+                ('status', models.CharField(choices=[('active', 'Active'), ('past_due', 'Past Due'), ('unpaid', 'Unpaid'), ('canceled', 'Canceled'), ('incomplete', 'Incomplete'), ('incomplete_expired', 'Incomplete Expired'), ('trialing', 'Trialing'), ('paused', 'Paused')], default='active', max_length=30)),
+                ('stripe_price_id', models.CharField(max_length=255)),
+                ('stripe_product_id', models.CharField(blank=True, max_length=255, null=True)),
+                ('current_period_start', models.DateTimeField(blank=True, null=True)),
+                ('current_period_end', models.DateTimeField(blank=True, null=True)),
+                ('cancel_at_period_end', models.BooleanField(default=False)),
+                ('canceled_at', models.DateTimeField(blank=True, null=True)),
+                ('trial_start', models.DateTimeField(blank=True, null=True)),
+                ('trial_end', models.DateTimeField(blank=True, null=True)),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='subscriptions', to='app_rbac.user')),
+            ],
+            options={
+                'db_table': 'subscriptions',
+            },
+        ),
+        migrations.AddIndex(
+            model_name='subscription',
+            index=models.Index(fields=['stripe_subscription_id'], name='idx_sub_stripe_id'),
+        ),
+        migrations.AddIndex(
+            model_name='subscription',
+            index=models.Index(fields=['stripe_customer_id'], name='idx_sub_customer_id'),
+        ),
+        migrations.AddIndex(
+            model_name='subscription',
+            index=models.Index(fields=['user'], name='idx_sub_user_id'),
+        ),
+        migrations.AddIndex(
+            model_name='subscription',
+            index=models.Index(fields=['status'], name='idx_sub_status'),
+        ),
+        migrations.AddIndex(
+            model_name='planconfig',
+            index=models.Index(fields=['stripe_price_id'], name='idx_plan_price_id'),
+        ),
+        migrations.AddIndex(
+            model_name='planconfig',
+            index=models.Index(fields=['stripe_product_id'], name='idx_plan_product_id'),
+        ),
+        migrations.AddIndex(
+            model_name='planconfig',
+            index=models.Index(fields=['name'], name='idx_plan_name'),
+        ),
+        migrations.AddIndex(
+            model_name='paymentevent',
+            index=models.Index(fields=['stripe_event_id'], name='idx_event_stripe_id'),
+        ),
+        migrations.AddIndex(
+            model_name='paymentevent',
+            index=models.Index(fields=['event_type'], name='idx_event_type'),
+        ),
+        migrations.AddIndex(
+            model_name='paymentevent',
+            index=models.Index(fields=['processed_at'], name='idx_event_processed'),
+        ),
+    ]

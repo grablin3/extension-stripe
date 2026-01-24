@@ -1,0 +1,50 @@
+package {{{javaPackageFull}}}.jpa.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
+
+import java.time.Instant;
+
+/**
+ * Payment event entity for {{{projectName}}}
+ *
+ * Tracks processed Stripe webhook events for idempotency
+ */
+@Entity
+@Table(name = "payment_events", indexes = {
+    @Index(name = "idx_payment_event_stripe_id", columnList = "stripe_event_id"),
+    @Index(name = "idx_payment_event_type", columnList = "event_type"),
+    @Index(name = "idx_payment_event_processed_at", columnList = "processed_at")
+})
+@Data
+@SuperBuilder
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(callSuper = true)
+@ToString(callSuper = true)
+public class PaymentEventEntity extends BaseEntity {
+
+    @Column(name = "stripe_event_id", unique = true, nullable = false, length = 255)
+    private String stripeEventId;
+
+    @Column(name = "event_type", nullable = false, length = 100)
+    private String eventType;
+
+    @Column(name = "processed_at", nullable = false)
+    private Instant processedAt;
+
+    @Column(name = "payload", columnDefinition = "TEXT")
+    private String payload;
+
+    @Column(name = "processing_status", nullable = false, length = 20)
+    @Builder.Default
+    private String processingStatus = "PROCESSED";
+
+    @Column(name = "error_message", columnDefinition = "TEXT")
+    private String errorMessage;
+
+    @Column(name = "retry_count", nullable = false)
+    @Builder.Default
+    private Integer retryCount = 0;
+}

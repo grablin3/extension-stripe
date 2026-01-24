@@ -1,0 +1,36 @@
+package {{{javaPackageFull}}}.jpa.enumtype;
+
+/**
+ * Subscription status enum for {{{projectName}}}
+ *
+ * Maps to Stripe subscription statuses
+ */
+public enum SubscriptionStatus {
+    ACTIVE("active"),
+    PAST_DUE("past_due"),
+    UNPAID("unpaid"),
+    CANCELED("canceled"),
+    INCOMPLETE("incomplete"),
+    INCOMPLETE_EXPIRED("incomplete_expired"),
+    TRIALING("trialing"),
+    PAUSED("paused");
+
+    private final String stripeStatus;
+
+    SubscriptionStatus(String stripeStatus) {
+        this.stripeStatus = stripeStatus;
+    }
+
+    public String getStripeStatus() {
+        return stripeStatus;
+    }
+
+    public static SubscriptionStatus fromStripeStatus(String status) {
+        for (SubscriptionStatus s : values()) {
+            if (s.stripeStatus.equals(status)) {
+                return s;
+            }
+        }
+        throw new IllegalArgumentException("Unknown Stripe status: " + status);
+    }
+}

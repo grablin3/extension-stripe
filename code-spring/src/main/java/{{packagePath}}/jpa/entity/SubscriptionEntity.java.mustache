@@ -1,0 +1,76 @@
+package {{{javaPackageFull}}}.jpa.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
+import {{{javaPackageFull}}}.jpa.enumtype.SubscriptionStatus;
+
+import java.time.Instant;
+
+/**
+ * Subscription entity for {{{projectName}}}
+ *
+ * Tracks user subscriptions synced from Stripe
+ */
+@Entity
+@Table(name = "subscriptions", indexes = {
+    @Index(name = "idx_subscription_stripe_id", columnList = "stripe_subscription_id"),
+    @Index(name = "idx_subscription_customer_id", columnList = "stripe_customer_id"),
+    @Index(name = "idx_subscription_user_id", columnList = "user_id"),
+    @Index(name = "idx_subscription_status", columnList = "status")
+})
+@Data
+@SuperBuilder
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode(callSuper = true)
+@ToString(callSuper = true)
+public class SubscriptionEntity extends BaseEntity {
+
+    @Column(name = "stripe_subscription_id", unique = true, nullable = false, length = 255)
+    private String stripeSubscriptionId;
+
+    @Column(name = "stripe_customer_id", nullable = false, length = 255)
+    private String stripeCustomerId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    @ToString.Exclude
+    private UserEntity user;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 30)
+    private SubscriptionStatus status;
+
+    @Column(name = "stripe_price_id", nullable = false, length = 255)
+    private String stripePriceId;
+
+    @Column(name = "stripe_product_id", length = 255)
+    private String stripeProductId;
+
+    @Column(name = "current_period_start")
+    private Instant currentPeriodStart;
+
+    @Column(name = "current_period_end")
+    private Instant currentPeriodEnd;
+
+    @Column(name = "cancel_at_period_end", nullable = false)
+    @Builder.Default
+    private Boolean cancelAtPeriodEnd = false;
+
+    @Column(name = "canceled_at")
+    private Instant canceledAt;
+
+    @Column(name = "trial_start")
+    private Instant trialStart;
+
+    @Column(name = "trial_end")
+    private Instant trialEnd;
+
+    /**
+     * Check if subscription is in active state
+     */
+    public boolean isActive() {
+        return status == SubscriptionStatus.ACTIVE || status == SubscriptionStatus.TRIALING;
+    }
+}

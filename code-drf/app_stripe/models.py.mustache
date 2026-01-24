@@ -1,0 +1,158 @@
+from django.db import models
+from django.conf import settings
+
+
+class SubscriptionStatus(models.TextChoices):
+    """Subscription status enum mapping to Stripe statuses"""
+    ACTIVE = 'active', 'Active'
+    PAST_DUE = 'past_due', 'Past Due'
+    UNPAID = 'unpaid', 'Unpaid'
+    CANCELED = 'canceled', 'Canceled'
+    INCOMPLETE = 'incomplete', 'Incomplete'
+    INCOMPLETE_EXPIRED = 'incomplete_expired', 'Incomplete Expired'
+    TRIALING = 'trialing', 'Trialing'
+    PAUSED = 'paused', 'Paused'
+
+
+class Subscription(models.Model):
+    """
+    Subscription model for {{projectName}}
+
+    Tracks user subscriptions synced from Stripe
+    """
+    # Base fields (equivalent to BaseEntity in Spring)
+    deleted = models.BooleanField(default=False)
+    delete_reason = models.CharField(max_length=500, blank=True, null=True)
+    tenant_id = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    modified_by = models.CharField(max_length=100, blank=True, null=True)
+    slug = models.CharField(max_length=255, blank=True, null=True)
+
+    # Subscription fields
+    stripe_subscription_id = models.CharField(max_length=255, unique=True)
+    stripe_customer_id = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        'app_rbac.User',
+        on_delete=models.CASCADE,
+        related_name='subscriptions'
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.ACTIVE
+    )
+    stripe_price_id = models.CharField(max_length=255)
+    stripe_product_id = models.CharField(max_length=255, blank=True, null=True)
+    current_period_start = models.DateTimeField(blank=True, null=True)
+    current_period_end = models.DateTimeField(blank=True, null=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    canceled_at = models.DateTimeField(blank=True, null=True)
+    trial_start = models.DateTimeField(blank=True, null=True)
+    trial_end = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'subscriptions'
+        indexes = [
+            models.Index(fields=['stripe_subscription_id'], name='idx_sub_stripe_id'),
+            models.Index(fields=['stripe_customer_id'], name='idx_sub_customer_id'),
+            models.Index(fields=['user'], name='idx_sub_user_id'),
+            models.Index(fields=['status'], name='idx_sub_status'),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.status}"
+
+    @property
+    def is_active(self):
+        """Check if subscription is in active state"""
+        return self.status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]
+
+
+class PlanConfig(models.Model):
+    """
+    Plan configuration model for {{projectName}}
+
+    Stores plan metadata and feature flags mapped to Stripe prices
+    """
+    # Base fields
+    deleted = models.BooleanField(default=False)
+    delete_reason = models.CharField(max_length=500, blank=True, null=True)
+    tenant_id = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    modified_by = models.CharField(max_length=100, blank=True, null=True)
+    slug = models.CharField(max_length=255, blank=True, null=True)
+
+    # Plan fields
+    name = models.CharField(max_length=100)
+    stripe_price_id = models.CharField(max_length=255, unique=True)
+    stripe_product_id = models.CharField(max_length=255)
+    price_cents = models.BigIntegerField()
+    currency = models.CharField(max_length=3, default='usd')
+    interval = models.CharField(max_length=20)
+    interval_count = models.IntegerField(default=1)
+    trial_period_days = models.IntegerField(blank=True, null=True)
+    features = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    display_order = models.IntegerField(default=0)
+    is_highlighted = models.BooleanField(default=False)
+    cta_text = models.CharField(max_length=50, default='Get Started')
+
+    class Meta:
+        db_table = 'plan_configs'
+        ordering = ['display_order']
+        indexes = [
+            models.Index(fields=['stripe_price_id'], name='idx_plan_price_id'),
+            models.Index(fields=['stripe_product_id'], name='idx_plan_product_id'),
+            models.Index(fields=['name'], name='idx_plan_name'),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def features_list(self):
+        """Get features as a list"""
+        if self.features:
+            return self.features.split('\n')
+        return []
+
+
+class PaymentEvent(models.Model):
+    """
+    Payment event model for {{projectName}}
+
+    Tracks processed Stripe webhook events for idempotency
+    """
+    # Base fields
+    deleted = models.BooleanField(default=False)
+    delete_reason = models.CharField(max_length=500, blank=True, null=True)
+    tenant_id = models.CharField(max_length=100, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.CharField(max_length=100, blank=True, null=True)
+    modified_by = models.CharField(max_length=100, blank=True, null=True)
+    slug = models.CharField(max_length=255, blank=True, null=True)
+
+    # Event fields
+    stripe_event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=100)
+    processed_at = models.DateTimeField()
+    payload = models.TextField(blank=True, null=True)
+    processing_status = models.CharField(max_length=20, default='PROCESSED')
+    error_message = models.TextField(blank=True, null=True)
+    retry_count = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'payment_events'
+        indexes = [
+            models.Index(fields=['stripe_event_id'], name='idx_event_stripe_id'),
+            models.Index(fields=['event_type'], name='idx_event_type'),
+            models.Index(fields=['processed_at'], name='idx_event_processed'),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} - {self.stripe_event_id}"

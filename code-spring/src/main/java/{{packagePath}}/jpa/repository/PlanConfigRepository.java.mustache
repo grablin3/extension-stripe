@@ -1,0 +1,23 @@
+package {{{javaPackageFull}}}.jpa.repository;
+
+import {{{javaPackageFull}}}.jpa.entity.PlanConfigEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Repository for plan configuration entities in {{{projectName}}}
+ */
+@Repository
+public interface PlanConfigRepository extends JpaRepository<PlanConfigEntity, Long> {
+
+    Optional<PlanConfigEntity> findByStripePriceId(String stripePriceId);
+
+    Optional<PlanConfigEntity> findByStripeProductId(String stripeProductId);
+
+    List<PlanConfigEntity> findByIsActiveTrueOrderByDisplayOrderAsc();
+
+    Optional<PlanConfigEntity> findByName(String name);
+}

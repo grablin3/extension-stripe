@@ -1,0 +1,28 @@
+package {{{javaPackageFull}}}.jpa.repository;
+
+import {{{javaPackageFull}}}.jpa.entity.SubscriptionEntity;
+import {{{javaPackageFull}}}.jpa.enumtype.SubscriptionStatus;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Repository for subscription entities in {{{projectName}}}
+ */
+@Repository
+public interface SubscriptionRepository extends JpaRepository<SubscriptionEntity, Long> {
+
+    Optional<SubscriptionEntity> findByStripeSubscriptionId(String stripeSubscriptionId);
+
+    List<SubscriptionEntity> findByStripeCustomerId(String stripeCustomerId);
+
+    List<SubscriptionEntity> findByUserId(Long userId);
+
+    Optional<SubscriptionEntity> findByUserIdAndStatus(Long userId, SubscriptionStatus status);
+
+    List<SubscriptionEntity> findByUserIdAndStatusIn(Long userId, List<SubscriptionStatus> statuses);
+
+    boolean existsByUserIdAndStatus(Long userId, SubscriptionStatus status);
+}

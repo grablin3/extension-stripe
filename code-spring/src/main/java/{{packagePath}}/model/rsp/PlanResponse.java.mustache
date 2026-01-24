@@ -1,0 +1,62 @@
+package {{{javaPackageFull}}}.model.rsp;
+
+import {{{javaPackageFull}}}.jpa.entity.PlanConfigEntity;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * Response containing plan details for pricing display
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PlanResponse {
+
+    private Long id;
+
+    private String name;
+
+    private String stripePriceId;
+
+    private Long priceCents;
+
+    private String currency;
+
+    private String interval;
+
+    private Integer intervalCount;
+
+    private Integer trialPeriodDays;
+
+    private List<String> features;
+
+    private Boolean isHighlighted;
+
+    private String ctaText;
+
+    public static PlanResponse fromEntity(PlanConfigEntity entity) {
+        List<String> featureList = entity.getFeatures() != null
+            ? Arrays.asList(entity.getFeatures().split("\n"))
+            : List.of();
+
+        return PlanResponse.builder()
+            .id(entity.getId())
+            .name(entity.getName())
+            .stripePriceId(entity.getStripePriceId())
+            .priceCents(entity.getPriceCents())
+            .currency(entity.getCurrency())
+            .interval(entity.getInterval())
+            .intervalCount(entity.getIntervalCount())
+            .trialPeriodDays(entity.getTrialPeriodDays())
+            .features(featureList)
+            .isHighlighted(entity.getIsHighlighted())
+            .ctaText(entity.getCtaText())
+            .build();
+    }
+}

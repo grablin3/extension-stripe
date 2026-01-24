@@ -1,0 +1,18 @@
+package {{{javaPackageFull}}}.model.req;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * Request to create a Stripe Customer Portal session
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class CreatePortalSessionRequest {
+
+    private String returnUrl;
+}

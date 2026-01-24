@@ -1,0 +1,166 @@
+package {{{javaPackageFull}}}.service;
+
+import com.stripe.model.Subscription;
+import com.stripe.model.checkout.Session;
+import {{{javaPackageFull}}}.jpa.entity.SubscriptionEntity;
+import {{{javaPackageFull}}}.jpa.entity.UserEntity;
+import {{{javaPackageFull}}}.jpa.enumtype.SubscriptionStatus;
+import {{{javaPackageFull}}}.jpa.repository.SubscriptionRepository;
+import {{{javaPackageFull}}}.jpa.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Subscription management service for {{{projectName}}}
+ */
+@Service
+@Profile("stripe")
+@RequiredArgsConstructor
+@Slf4j
+public class SubscriptionService {
+
+    private final SubscriptionRepository subscriptionRepository;
+    private final UserRepository userRepository;
+
+    /**
+     * Find subscription by Stripe subscription ID
+     */
+    public Optional<SubscriptionEntity> findByStripeSubscriptionId(String stripeSubscriptionId) {
+        return subscriptionRepository.findByStripeSubscriptionId(stripeSubscriptionId);
+    }
+
+    /**
+     * Find subscriptions for a user
+     */
+    public List<SubscriptionEntity> findByUserId(Long userId) {
+        return subscriptionRepository.findByUserId(userId);
+    }
+
+    /**
+     * Find active subscription for a user
+     */
+    public Optional<SubscriptionEntity> findActiveSubscription(Long userId) {
+        return subscriptionRepository.findByUserIdAndStatusIn(
+            userId,
+            List.of(SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING)
+        ).stream().findFirst();
+    }
+
+    /**
+     * Check if user has an active subscription
+     */
+    public boolean hasActiveSubscription(Long userId) {
+        return subscriptionRepository.existsByUserIdAndStatus(userId, SubscriptionStatus.ACTIVE) ||
+               subscriptionRepository.existsByUserIdAndStatus(userId, SubscriptionStatus.TRIALING);
+    }
+
+    /**
+     * Create subscription from checkout session completion
+     */
+    @Transactional
+    public SubscriptionEntity createFromCheckoutSession(Session session, Subscription stripeSubscription) {
+        String customerEmail = session.getCustomerEmail();
+        if (customerEmail == null && session.getCustomerDetails() != null) {
+            customerEmail = session.getCustomerDetails().getEmail();
+        }
+        if (customerEmail == null) {
+            throw new IllegalStateException("No customer email found in checkout session: " + session.getId());
+        }
+
+        UserEntity user = userRepository.findByEmail(customerEmail)
+            .orElseThrow(() -> new IllegalStateException("User not found for email: " + customerEmail));
+
+        var items = stripeSubscription.getItems();
+        if (items == null || items.getData() == null || items.getData().isEmpty()) {
+            throw new IllegalStateException("No subscription items found for subscription: " + stripeSubscription.getId());
+        }
+        var firstItem = items.getData().get(0);
+        var price = firstItem.getPrice();
+        if (price == null) {
+            throw new IllegalStateException("No price found for subscription item: " + stripeSubscription.getId());
+        }
+
+        // Validate required Stripe response fields
+        if (stripeSubscription.getCurrentPeriodStart() == null || stripeSubscription.getCurrentPeriodEnd() == null) {
+            throw new IllegalStateException("Missing period dates for subscription: " + stripeSubscription.getId());
+        }
+
+        SubscriptionEntity subscription = SubscriptionEntity.builder()
+            .stripeSubscriptionId(stripeSubscription.getId())
+            .stripeCustomerId(stripeSubscription.getCustomer())
+            .user(user)
+            .status(SubscriptionStatus.fromStripeStatus(stripeSubscription.getStatus()))
+            .stripePriceId(price.getId())
+            .stripeProductId(price.getProduct() != null ? price.getProduct() : "unknown")
+            .currentPeriodStart(Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodStart()))
+            .currentPeriodEnd(Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodEnd()))
+            .cancelAtPeriodEnd(Boolean.TRUE.equals(stripeSubscription.getCancelAtPeriodEnd()))
+            .build();
+
+        if (stripeSubscription.getTrialStart() != null) {
+            subscription.setTrialStart(Instant.ofEpochSecond(stripeSubscription.getTrialStart()));
+        }
+        if (stripeSubscription.getTrialEnd() != null) {
+            subscription.setTrialEnd(Instant.ofEpochSecond(stripeSubscription.getTrialEnd()));
+        }
+
+        log.info("Creating subscription for user {} with Stripe ID {}",
+            user.getId(), stripeSubscription.getId());
+
+        return subscriptionRepository.save(subscription);
+    }
+
+    /**
+     * Update subscription from Stripe webhook
+     */
+    @Transactional
+    public SubscriptionEntity updateFromStripeSubscription(Subscription stripeSubscription) {
+        SubscriptionEntity subscription = subscriptionRepository
+            .findByStripeSubscriptionId(stripeSubscription.getId())
+            .orElseThrow(() -> new IllegalStateException(
+                "Subscription not found: " + stripeSubscription.getId()));
+
+        subscription.setStatus(SubscriptionStatus.fromStripeStatus(stripeSubscription.getStatus()));
+        if (stripeSubscription.getCurrentPeriodStart() != null) {
+            subscription.setCurrentPeriodStart(Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodStart()));
+        }
+        if (stripeSubscription.getCurrentPeriodEnd() != null) {
+            subscription.setCurrentPeriodEnd(Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodEnd()));
+        }
+        subscription.setCancelAtPeriodEnd(Boolean.TRUE.equals(stripeSubscription.getCancelAtPeriodEnd()));
+
+        if (stripeSubscription.getCanceledAt() != null) {
+            subscription.setCanceledAt(Instant.ofEpochSecond(stripeSubscription.getCanceledAt()));
+        }
+
+        log.info("Updated subscription {} to status {}",
+            stripeSubscription.getId(), subscription.getStatus());
+
+        return subscriptionRepository.save(subscription);
+    }
+
+    /**
+     * Mark subscription as canceled
+     */
+    @Transactional
+    public SubscriptionEntity cancelSubscription(String stripeSubscriptionId) {
+        SubscriptionEntity subscription = subscriptionRepository
+            .findByStripeSubscriptionId(stripeSubscriptionId)
+            .orElseThrow(() -> new IllegalStateException(
+                "Subscription not found: " + stripeSubscriptionId));
+
+        subscription.setStatus(SubscriptionStatus.CANCELED);
+        subscription.setCanceledAt(Instant.now());
+
+        log.info("Canceled subscription {}", stripeSubscriptionId);
+
+        return subscriptionRepository.save(subscription);
+    }
+}

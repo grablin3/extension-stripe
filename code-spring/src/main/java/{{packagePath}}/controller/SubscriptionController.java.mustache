@@ -1,0 +1,219 @@
+package {{{javaPackageFull}}}.controller;
+
+import com.stripe.exception.StripeException;
+import com.stripe.model.checkout.Session;
+import {{{javaPackageFull}}}.jpa.entity.PlanConfigEntity;
+import {{{javaPackageFull}}}.jpa.entity.SubscriptionEntity;
+import {{{javaPackageFull}}}.jpa.entity.UserEntity;
+import {{{javaPackageFull}}}.jpa.repository.PlanConfigRepository;
+import {{{javaPackageFull}}}.jpa.repository.SubscriptionRepository;
+import {{{javaPackageFull}}}.jpa.repository.UserRepository;
+import {{{javaPackageFull}}}.model.req.CreateCheckoutRequest;
+import {{{javaPackageFull}}}.model.req.CreatePortalSessionRequest;
+import {{{javaPackageFull}}}.model.rsp.CheckoutSessionResponse;
+import {{{javaPackageFull}}}.model.rsp.PlanResponse;
+import {{{javaPackageFull}}}.model.rsp.PortalSessionResponse;
+import {{{javaPackageFull}}}.model.rsp.SubscriptionResponse;
+import {{{javaPackageFull}}}.service.StripeService;
+import {{{javaPackageFull}}}.service.SubscriptionService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Subscription and checkout controller for {{{projectName}}}
+ */
+@RestController
+@RequestMapping("/api/v1/stripe")
+@Profile("stripe")
+@RequiredArgsConstructor
+@Slf4j
+public class SubscriptionController {
+
+    private final StripeService stripeService;
+    private final SubscriptionService subscriptionService;
+    private final UserRepository userRepository;
+    private final PlanConfigRepository planConfigRepository;
+    private final SubscriptionRepository subscriptionRepository;
+
+    /**
+     * Get available pricing plans
+     */
+    @GetMapping("/plans")
+    public ResponseEntity<List<PlanResponse>> getPlans() {
+        List<PlanConfigEntity> plans = planConfigRepository.findByIsActiveTrueOrderByDisplayOrderAsc();
+        List<PlanResponse> response = plans.stream()
+            .map(PlanResponse::fromEntity)
+            .toList();
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Get current user's subscription
+     */
+    @GetMapping("/subscription")
+    public ResponseEntity<SubscriptionResponse> getCurrentSubscription(
+            @AuthenticationPrincipal Jwt jwt) {
+
+        UserEntity user = getUserFromJwt(jwt);
+
+        return subscriptionService.findActiveSubscription(user.getId())
+            .map(sub -> ResponseEntity.ok(SubscriptionResponse.fromEntity(sub)))
+            .orElse(ResponseEntity.noContent().build());
+    }
+
+    /**
+     * Get all subscriptions for current user
+     */
+    @GetMapping("/subscriptions")
+    public ResponseEntity<List<SubscriptionResponse>> getSubscriptions(
+            @AuthenticationPrincipal Jwt jwt) {
+
+        UserEntity user = getUserFromJwt(jwt);
+
+        List<SubscriptionResponse> subscriptions = subscriptionService.findByUserId(user.getId())
+            .stream()
+            .map(SubscriptionResponse::fromEntity)
+            .toList();
+
+        return ResponseEntity.ok(subscriptions);
+    }
+
+    {{#enableSubscriptions}}
+    /**
+     * Create a checkout session for subscription
+     */
+    @PostMapping("/create-checkout-session")
+    public ResponseEntity<CheckoutSessionResponse> createCheckoutSession(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody CreateCheckoutRequest request) throws StripeException {
+
+        UserEntity user = getUserFromJwt(jwt);
+
+        // Create or get Stripe customer
+        var customer = stripeService.createOrGetCustomer(
+            user.getEmail(),
+            user.getFullName()
+        );
+
+        // Create checkout session with idempotency key
+        // Key is based on user + price to prevent duplicate sessions for same checkout attempt
+        String idempotencyKey = "checkout_sub_" + user.getId() + "_" + request.getPriceId() + "_" + UUID.randomUUID();
+        Session session = stripeService.createSubscriptionCheckoutSession(
+            customer.getId(),
+            request.getPriceId(),
+            request.getSuccessUrl(),
+            request.getCancelUrl(),
+            request.getTrialPeriodDays(),
+            idempotencyKey
+        );
+
+        log.info("Created checkout session {} for user {}", session.getId(), user.getId());
+
+        return ResponseEntity.ok(CheckoutSessionResponse.of(session.getId(), session.getUrl()));
+    }
+
+    /**
+     * Cancel subscription at period end
+     */
+    @PostMapping("/subscription/cancel")
+    public ResponseEntity<SubscriptionResponse> cancelSubscription(
+            @AuthenticationPrincipal Jwt jwt) throws StripeException {
+
+        UserEntity user = getUserFromJwt(jwt);
+
+        SubscriptionEntity subscription = subscriptionService.findActiveSubscription(user.getId())
+            .orElseThrow(() -> new IllegalStateException("No active subscription found"));
+
+        // Cancel in Stripe
+        stripeService.cancelSubscriptionAtPeriodEnd(subscription.getStripeSubscriptionId());
+
+        // Update local record
+        subscription.setCancelAtPeriodEnd(true);
+        subscriptionRepository.save(subscription);
+
+        log.info("Scheduled subscription {} for cancellation at period end", subscription.getStripeSubscriptionId());
+
+        return ResponseEntity.ok(SubscriptionResponse.fromEntity(subscription));
+    }
+    {{/enableSubscriptions}}
+
+    {{#enableOneTimePayments}}
+    /**
+     * Create a checkout session for one-time payment
+     */
+    @PostMapping("/create-payment-session")
+    public ResponseEntity<CheckoutSessionResponse> createPaymentSession(
+            @AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody CreateCheckoutRequest request) throws StripeException {
+
+        UserEntity user = getUserFromJwt(jwt);
+
+        // Create or get Stripe customer
+        var customer = stripeService.createOrGetCustomer(
+            user.getEmail(),
+            user.getFullName()
+        );
+
+        // Create checkout session with idempotency key
+        String idempotencyKey = "checkout_pay_" + user.getId() + "_" + request.getPriceId() + "_" + UUID.randomUUID();
+        Session session = stripeService.createPaymentCheckoutSession(
+            customer.getId(),
+            request.getPriceId(),
+            request.getQuantity(),
+            request.getSuccessUrl(),
+            request.getCancelUrl(),
+            idempotencyKey
+        );
+
+        log.info("Created payment session {} for user {}", session.getId(), user.getId());
+
+        return ResponseEntity.ok(CheckoutSessionResponse.of(session.getId(), session.getUrl()));
+    }
+    {{/enableOneTimePayments}}
+
+    {{#enableCustomerPortal}}
+    /**
+     * Create a customer portal session
+     */
+    @PostMapping("/create-portal-session")
+    public ResponseEntity<PortalSessionResponse> createPortalSession(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody(required = false) CreatePortalSessionRequest request) throws StripeException {
+
+        UserEntity user = getUserFromJwt(jwt);
+
+        // Get customer from subscription
+        SubscriptionEntity subscription = subscriptionRepository.findByUserId(user.getId())
+            .stream()
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("No subscription found for user"));
+
+        // Create portal session with idempotency key
+        String idempotencyKey = "portal_" + user.getId() + "_" + UUID.randomUUID();
+        var portalSession = stripeService.createPortalSession(
+            subscription.getStripeCustomerId(),
+            request != null ? request.getReturnUrl() : null,
+            idempotencyKey
+        );
+
+        log.info("Created portal session for user {}", user.getId());
+
+        return ResponseEntity.ok(PortalSessionResponse.of(portalSession.getUrl()));
+    }
+    {{/enableCustomerPortal}}
+
+    private UserEntity getUserFromJwt(Jwt jwt) {
+        String email = jwt.getClaimAsString("email");
+        return userRepository.findByEmail(email)
+            .orElseThrow(() -> new IllegalStateException("User not found for email: " + email));
+    }
+}
