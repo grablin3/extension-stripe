@@ -301,6 +301,72 @@ module.exports = {
           ]
         }
       ]
+    },
+    {
+      name: 'stripe-with-digitalocean-provider',
+      description: 'Stripe with DigitalOcean provider - Docker deployment with secrets',
+      dependencies: ['extension-rdbms'],
+      config: {
+        moduleId: 'stripe-do',
+        kind: 'extension',
+        type: 'stripe',
+        providers: ['spring', 'digitalocean'],
+        enabled: true,
+        fieldValues: {
+          enableSubscriptions: true,
+          enableCustomerPortal: true,
+          webhookEndpoint: '/api/stripe/webhook'
+        }
+      },
+      expectedFiles: [
+        'backend/src/main/java/com/example/config/StripeConfig.java',
+        'backend/src/main/java/com/example/controller/StripeWebhookController.java',
+        'backend/src/main/resources/application-stripe.yaml'
+      ],
+      fileContentChecks: [
+        {
+          file: 'backend/src/main/resources/application-stripe.yaml',
+          contains: [
+            'STRIPE_API_KEY',
+            'STRIPE_WEBHOOK_SECRET'
+          ]
+        }
+      ]
+    },
+    {
+      name: 'stripe-fullstack-digitalocean',
+      description: 'Stripe full-stack with DigitalOcean - Spring + React + DO',
+      dependencies: ['extension-rdbms'],
+      config: {
+        moduleId: 'stripe-fullstack-do',
+        kind: 'extension',
+        type: 'stripe',
+        providers: ['spring', 'react', 'digitalocean'],
+        enabled: true,
+        fieldValues: {
+          enableSubscriptions: true,
+          enableOneTimePayments: true,
+          enableCustomerPortal: true
+        }
+      },
+      expectedFiles: [
+        // Backend
+        'backend/src/main/java/com/example/controller/StripeWebhookController.java',
+        'backend/src/main/java/com/example/service/StripeService.java',
+        // Frontend
+        'frontend/src/components/stripe/CheckoutButton.tsx',
+        'frontend/src/hooks/useStripe.ts'
+      ],
+      fileContentChecks: [
+        {
+          file: 'backend/src/main/java/com/example/service/StripeService.java',
+          contains: ['createSubscriptionCheckoutSession', 'createPaymentCheckoutSession']
+        },
+        {
+          file: 'frontend/src/hooks/useStripe.ts',
+          contains: ['VITE_STRIPE_PUBLISHABLE_KEY']
+        }
+      ]
     }
   ],
 
